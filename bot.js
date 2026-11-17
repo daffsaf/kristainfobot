@@ -1,85 +1,111 @@
-const TelegramBot = require("node-telegram-bot-api");
+const TelegramBot = require('node-telegram-bot-api');
+const http = require('http');
 
+// Paleidžiame HTTP serverį, kad Render (Web Service) nepalaikytų klaidos ir neuždarytų botiuko
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('KristaInfoBot is running!\n');
+});
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+  console.log(`Server is listening on port ${PORT}`);
+});
+
+// Pakeiskite šį žetoną (token) arba palikite aplinkos kintamąjį
 const token = process.env.BOT_TOKEN;
-if (!token) {
-  console.error("Trūksta BOT_TOKEN aplinkos kintamojo. Įrašyk jį hostingo nustatymuose.");
-  process.exit(1);
-}
+const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID; // Čia ateis bilietai (-5475178737)
 
 const bot = new TelegramBot(token, { polling: true });
 
-// Pagrindinio meniu mygtukai (pridėtos prekės ir atnaujinta pagalba)
-const menu = {
+// Pagrindinis meniu mygtukų dizainas
+const mainKeyboard = {
   reply_markup: {
     keyboard: [
-      ["📦 Prekių sąrašas", "📞 Kontaktai"],
-      ["❓ Pagalba (Ticket)", "ℹ️ Apie mus"]
+      [{ text: 'Prekių sąrašas' }, { text: 'Kontaktai' }],
+      [{ text: 'Pagalba (Ticket)' }, { text: 'Apie mus' }]
     ],
     resize_keyboard: true
   }
 };
 
-bot.onText(/^\/start$/, (msg) => {
+// Start komanda
+bot.onText(/\/start/, (msg) => {
+  if (msg.chat.type !== 'private') return; // Grupėse /start ignoruojamas
+  
+  const chatId = msg.chat.id;
   bot.sendMessage(
-    msg.chat.id,
-    "Sveiki atvykę į KristaInfoBot! 👋\n\nPasirinkite norimą skiltį žemiau esančiame meniu.",
-    menu
+    chatId,
+    'Sveiki! 👋 Kuo galime padėti?\nPasirinkite vieną iš meniu punktų.',
+    mainKeyboard
   );
 });
 
-bot.onText(/^\/help$/, (msg) => {
+// Bilietų (Ticket) būsenos sekimui, jei vartotojas rašo problemą
+const waitingForTicket = new Set();
+
+// Žinučių apdorojimas
+bot.on('message', async (msg) => {
+  // SVARBI APSAUGA: Jei žinutė ne iš asmeninio pokalbio (t.y. grupėje ar kanale), botas visiškai nereaguoja!
+  if (msg.chat.type !== 'private') return;
+
+  if (!msg.text || msg.text.startsWith('/')) return;
+
+  const text = msg.text.trim();
+  const chatId = msg.chat.id;
+  const userId = msg.from.id;
+  const username = msg.from.username ? `@${msg.from.username}` : (msg.from.first_name || 'Vartotojas');
+
+  // Jei vartotojas paspaudė „Pagalba (Ticket)“
+  if (text === 'Pagalba (Ticket)') {
+    waitingForTicket.add(userId);
+    return bot.sendMessage(
+      chatId,
+      '✍️ Parašykite savo problemą ar klausimą čia, ir administratorius su jumis susisieks:',
+      { reply_markup: { remove_keyboard: true } }
+    );
+  }
+
+  // Jei vartotojas rašo savo problemą po paspausto biletuko
+  if (waitingForTicket.has(userId)) {
+    waitingForTicket.delete(userId);
+
+    // Siunčiame pranešimą į administratorių grupę
+    if (ADMIN_CHAT_ID) {
+      const adminMessage = `🚨 **Gautas naujas bilietas (Ticket)!**\n\n👤 **Vartotojas:** ${username} (ID: \`${userId}\мых\``\n💬 **Žinutė:** ${text}`;
+      
+      try {
+        await bot.sendMessage(ADMIN_CHAT_ID, adminMessage, { parse_mode: 'Markdown' });
+      } catch (err) {
+        console.error('Klaida siunčiant administracijai:', err);
+      }
+    }
+
+    // Atsakome vartotojui, kad bilietas gautas
+    return bot.sendMessage(
+      chatId,
+      '✅ Jūsų žinutė perduota administracijai. Greitu metu susisieksime!',
+      mainKeyboard
+    );
+  }
+
+  // Kiti meniu punktai
+  if (text === 'Prekių sąrašas') {
+    return bot.sendMessage(chatId, '📦 Čia yra mūsų prekių sąrašas: [Nuoroda į katalogą]', mainKeyboard);
+  }
+
+  if (text === 'Kontaktai') {
+    return bot.sendMessage(chatId, '📞 Susisiekti galite el. paštu: info@pavyzdys.lt arba telefonu.', mainKeyboard);
+  }
+
+  if (text === 'Apie mus') {
+    return bot.sendMessage(chatId, 'ℹ️ Mes esame įmonė, padedanti rasti geriausius sprendimus.', mainKeyboard);
+  }
+
+  // Numatytasis atsakymas bet kokiam kitam tekstui
   bot.sendMessage(
-    msg.chat.id,
-    "Galimos komandos:\n/start – pradžia\n/help – pagalba\n/contact – kontaktai\n/prekes – prekių sąrašas",
-    menu
+    chatId,
+    'Ačiū už žinutę! 😊 Pasirinkite norimą punktą meniu.',
+    mainKeyboard
   );
 });
-
-bot.onText(/^\/about$/, (msg) => {
-  bot.sendMessage(msg.chat.id, "ℹ️ Apie mus\n\nTai informacinis botas, skirtas teikti naujausią informaciją bei pagalbą.", menu);
-});
-
-bot.onText(/^\/contact$/, (msg) => {
-  bot.sendMessage(msg.chat.id, "📞 Kontaktai:\n\nTelegram: @Vadovybe\nSusisiekite su administracija tiesiogiai.", menu);
-});
-
-bot.onText(/^\/prekes$/, (msg) => {
-  bot.sendMessage(msg.chat.id, "📦 **Prekių sąrašas:**\n\n1. Žolytė 🌱\n2. Kristutė 💎\n\nNorėdami užsisakyti ar gauti daugiau info, kreipkitės į administraciją @Vadovybe.", { parse_mode: "Markdown" });
-});
-
-bot.on("message", (msg) => {
-  if (!msg.text || msg.text.startsWith("/")) return;
-  const t = msg.text.toLowerCase().trim();
-
-  if (["📦 prekių sąrašas", "prekių sąrašas", "prekes"].includes(t)) {
-    return bot.sendMessage(
-      msg.chat.id, 
-      "📦 **Prekių sąrašas:**\n\n1. Žolytė 🌱\n2. Kristutė 💎\n\nNorėdami užsisakyti ar gauti daugiau info, kreipkitės į administraciją @Vadovybe.", 
-      { parse_mode: "Markdown", ...menu }
-    );
-  }
-
-  if (["📞 kontaktai", "kontaktai", "contact"].includes(t)) {
-    return bot.sendMessage(msg.chat.id, "📞 Kontaktai:\n\nTelegram: @Vadovybe\nSusisiekite su administracija tiesiogiai.", menu);
-  }
-
-  if (["❓ pagalba (ticket)", "pagalba", "help"].includes(t)) {
-    return bot.sendMessage(
-      msg.chat.id, 
-      "❓ **Pagalbos sistema (Ticket)**\n\nJei turite klausimų ar problemų, kreipkitės į mūsų administracijos kanalą / asmenį:\n👉 **@Vadovybe**\n\nAdministratoriai matys jūsų bilietą ir greitai su jumis susisieks!", 
-      { parse_mode: "Markdown", ...menu }
-    );
-  }
-
-  if (["ℹ️ apie mus", "apie mus", "about us"].includes(t)) {
-    return bot.sendMessage(msg.chat.id, "ℹ️ Apie mus\n\nTai informacinis botas, skirtas teikti naujausią informaciją bei pagalbą.", menu);
-  }
-
-  if (/\b(labas|sveiki|sveikas|sveika)\b/.test(t)) {
-    return bot.sendMessage(msg.chat.id, "Sveiki! 👋 Kuo galime padėti? Pasirinkite vieną iš meniu punktų.", menu);
-  }
-
-  bot.sendMessage(msg.chat.id, "Ačiū už žinutę! 😊 Pasirinkite norimą punktą meniu.", menu);
-});
-
-console.log("KristaInfoBot sėkmingai paleistas!");
