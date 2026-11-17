@@ -1,0 +1,12 @@
+{
+  "name": "kristainfobot",
+  "version": "1.0.0",
+  "description": "KristaInfoBot Telegram",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "dependencies": {
+    "node-telegram-bot-api": "^0.66.0"
+  }
+}
